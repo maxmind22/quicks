@@ -1,2 +1,2 @@
-this is a simple web app used to esarch your documents using semantic search 
+this is a simple web app using semantic search from uploaded documents 
 # github
