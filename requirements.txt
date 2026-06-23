@@ -1,0 +1,11 @@
+flask
+bootstrap-flask
+flask-login
+flask-sqlalchemy
+flask-wtf
+wtforms
+langchain
+langchain-openai
+langchain-community
+pinecone-client
+pypdf

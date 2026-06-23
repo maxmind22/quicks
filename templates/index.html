@@ -1,20 +1,32 @@
-{% extends "base.html" %} {% block content %}
+{% extends "base.html" %}
+{% block content %}
 
-<div class="box">
+<div class="box glass-card">
+  <i class="fa-solid fa-bolt text-warning mb-4" style="font-size: 3rem;"></i>
+  <h1 class="mb-3">Welcome to Quicks</h1>
+  <p class="text-muted mb-4">An intelligent document search engine utilizing semantic embedding RAG technology to query your uploaded files instantly.</p>
   
-  <h1>Welcome to Quicks, an AI Document search</h1>
-  
-</div>
-{% with messages = get_flashed_messages() %}
-    {% if messages %}
-      
-          <div class="alert alert-info">
-             <button type="button" class="close" data-dismiss="alert">&times;</button>
-             {% for message in messages %}
-                {{ message }}
-                <script src= ./static/js/alert.js></script>
-              {% endfor %} 
-    {% endif %}
-    {% endwith %}
+  {% if not current_user.is_authenticated %}
+    <div class="d-flex justify-content-center gap-3">
+      <a href="{{ url_for('login') }}" class="btn btn-primary px-4 py-2">Get Started</a>
+      <a href="{{ url_for('register') }}" class="btn btn-outline-light px-4 py-2">Create Account</a>
     </div>
+  {% else %}
+    <a href="{{ url_for('dashboard') }}" class="btn btn-primary px-4 py-2">Go to Dashboard</a>
+  {% endif %}
+</div>
+
+<div class="max-width-500 mx-auto mt-4">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show" role="alert">
+          <span>{{ message }}</span>
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+</div>
+
 {% endblock %}

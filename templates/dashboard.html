@@ -1,23 +1,100 @@
-{% from "bootstrap5/form.html" import render_form %} 
-{% extends "base.html" %} {% block content %}
+{% extends "base.html" %}
+{% block content %}
 
-<div class="results">
-</div>
-<div class="search-box">
-  {{render_form(form, novalidate=True, button_map={"submit": "primary"}) }}
-  {% with messages = get_flashed_messages() %}
-    {% if messages %}
-      
-          <div class="alert alert-info">
-             <button type="button" class="close" data-dismiss="alert">&times;</button>
-             {% for message in messages %}
-          {{ message }}
-          <script src= ./static/js/alert.js></script>
-       {% endfor %}
-       {%endif%}
-       {%endwith%}
-       
+<div class="dashboard-grid">
+  <!-- Left Column: Sidebar with Files -->
+  <div class="dashboard-sidebar glass-card">
+    <div class="files-list-header d-flex justify-content-between align-items-center">
+      <h5 class="mb-0"><i class="fa-solid fa-folder-open me-2 text-info"></i>My Documents</h5>
+      <a href="{{ url_for('upload') }}" class="btn btn-sm btn-outline-light px-2" title="Upload new document">
+        <i class="fa-solid fa-plus"></i> Add
+      </a>
+    </div>
+
+    <!-- Alert flashes in sidebar -->
+    <div class="mt-2">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show p-2 mb-2" style="font-size: 0.8rem;" role="alert">
+              <span>{{ message }}</span>
+              <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close" style="padding: 0.5rem;"></button>
+            </div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+    </div>
+
+    <div class="files-scrollable mt-2">
+      {% if files %}
+        {% for file in files %}
+          <div class="file-item">
+            <div class="file-info text-truncate">
+              {% if file.endswith('.pdf') %}
+                <i class="fa-solid fa-file-pdf file-icon text-danger"></i>
+              {% else %}
+                <i class="fa-solid fa-file-lines file-icon text-info"></i>
+              {% endif %}
+              <span title="{{ file }}">{{ file }}</span>
+            </div>
+            
+            <form action="{{ url_for('delete_file', filename=file) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this file and clear its embeddings?');">
+              <button type="submit" class="file-delete-btn" title="Delete file & embeddings">
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+            </form>
           </div>
+        {% endfor %}
+      {% else %}
+        <div class="text-center py-5 text-muted">
+          <i class="fa-solid fa-cloud-arrow-up mb-3" style="font-size: 2rem; opacity: 0.5;"></i>
+          <p class="mb-0" style="font-size: 0.9rem;">No documents uploaded yet.</p>
+          <a href="{{ url_for('upload') }}" class="btn btn-link btn-sm text-decoration-none">Upload your first file</a>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Right Column: Chat Box -->
+  <div class="dashboard-main glass-card">
+    <div class="chat-container">
+      <div class="results">
+        <!-- Initial Welcome/Helper Message -->
+        <div class="chat-message-left pb-4">
+          <div>
+            <div class="flex-shrink-1 bg-dark text-light rounded py-2 px-3 ml-3 max-width-70 shadow-sm border border-secondary">
+              <div class="font-weight-bold mb-1 text-info">Quicks AI</div>
+              Welcome to Quicks! Ask any question about your uploaded documents, and I'll search your context for answers.
+            </div>
+          </div>
+        </div>
+        
+        <!-- Search warning if credentials missing -->
+        {% if not credentials_ok %}
+        <div class="chat-message-left pb-4">
+          <div>
+            <div class="flex-shrink-1 bg-danger text-light rounded py-2 px-3 ml-3 max-width-70 shadow-sm">
+              <div class="font-weight-bold mb-1"><i class="fa-solid fa-triangle-exclamation me-1"></i>System Warning</div>
+              API keys are missing in the environment. Please run the server with the <strong>OPENAI_API_KEY</strong> and <strong>PINECONE_API_KEY</strong> variables set, otherwise indexing and queries will return errors.
+            </div>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Custom-rendered Search Input Bar -->
+      <form method="POST" class="mt-auto">
+        {{ form.csrf_token }}
+        <div class="input-group search-input-group">
+          {{ form.search(class="form-control py-3 bg-dark text-light border-secondary", id="search-input", placeholder="Ask a question about your documents...") }}
+          {{ form.submit(class="btn btn-primary px-4", id="submit") }}
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
-<script src= ./static/js/script.js></script>
+
+<script src="{{ url_for('static', filename='js/script.js') }}"></script>
+<script src="{{ url_for('static', filename='js/alert.js') }}"></script>
+
 {% endblock %}

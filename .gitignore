@@ -1,0 +1,23 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Environments
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+venv/
+ENV/
+
+# Databases
+instance/
+*.db
+*.sqlite
+
+# Uploads
+static/uploads/
