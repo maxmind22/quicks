@@ -94,13 +94,13 @@ def get_embeddings():
     """Initializes and returns OpenAI Embeddings."""
     if not os.environ.get('OPENAI_API_KEY'):
         raise ValueError("OPENAI_API_KEY environment variable is missing.")
-    return OpenAIEmbeddings(model='text-embedding-ada-002')
+    return OpenAIEmbeddings(model='text-embedding-3-small')
 
 def get_llm():
     """Initializes and returns ChatOpenAI model."""
     if not os.environ.get('OPENAI_API_KEY'):
         raise ValueError("OPENAI_API_KEY environment variable is missing.")
-    return ChatOpenAI(model='gpt-3.5-turbo')
+    return ChatOpenAI(model='gpt-4o-mini')
 
 def load_documents(directory, filename):
     """Loads a single document (PDF or Text) from directory."""
