@@ -19,7 +19,7 @@ Designed with a premium **dark-themed glassmorphism** user interface and built-i
 ## 🛠️ Technology Stack
 
 * **Backend**: Flask, Flask-Login, Flask-SQLAlchemy (SQLite database), WTForms
-* **AI/RAG Engine**: LangChain, OpenAI Embeddings (`text-embedding-ada-002`), GPT-3.5 Chat Model (`gpt-3.5-turbo`), Pinecone Client SDK
+* **AI/RAG Engine**: LangChain, OpenAI Embeddings (`text-embedding-3-small`), GPT-4o-Mini (`gpt-4o-mini`), Pinecone Client SDK
 * **Frontend**: HTML5, Vanilla CSS3 (Custom Glassmorphism system), Bootstrap 5.3.0, FontAwesome 6, jQuery AJAX
 
 ---
