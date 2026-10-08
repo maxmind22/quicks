@@ -1,5 +1,7 @@
 # ⚡ Quicks — AI Document Search
 
+🔗 **Live Deployment:** [https://quicks.mpeka.rw](https://quicks.mpeka.rw)
+
 Quicks is a modern, responsive, and secure Retrieval-Augmented Generation (RAG) web application. It enables users to upload document collections (PDFs, text files) and run semantic query searches to get immediate, context-aware answers from their own data.
 
 Designed with a premium **dark-themed glassmorphism** user interface and built-in **multi-tenancy security**, it keeps document collections and query vectors completely isolated between different user spaces.
