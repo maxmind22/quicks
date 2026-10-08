@@ -21,3 +21,4 @@ instance/
 
 # Uploads
 static/uploads/
+public/static/uploads/
