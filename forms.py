@@ -17,7 +17,7 @@ class LoginForm(FlaskForm):
 
 
 class Files(FlaskForm):
-    file = FileField("chose file", validators=[DataRequired()])
+    file = FileField("Choose File", validators=[DataRequired()])
     submit = SubmitField("Submit")
 
 

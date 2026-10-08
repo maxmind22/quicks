@@ -2,8 +2,8 @@
 {% extends "base.html" %}
 {% block content %}
 
-<!-- Flash Alerts on Top for Immediate Visibility -->
-<div class="mx-auto mb-3" style="max-width: 520px;">
+<!-- Flash & Client Validation Alerts on Top for Immediate Visibility -->
+<div id="upload-alert-container" class="mx-auto mb-3" style="max-width: 520px;">
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       {% for category, message in messages %}
@@ -38,5 +38,66 @@
     </a>
   </div>
 </div>
+
+<!-- Client-side Instant Validation to Prevent Vercel 413 Payload Errors -->
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const fileInput = document.querySelector('input[type="file"]');
+    const form = fileInput ? fileInput.closest('form') : null;
+    const alertContainer = document.getElementById('upload-alert-container');
+    const submitBtn = form ? form.querySelector('button[type="submit"], input[type="submit"]') : null;
+    const maxBytes = {{ max_file_size_mb }} * 1024 * 1024;
+    const maxMb = {{ max_file_size_mb }};
+
+    function showAlert(msg) {
+      if (!alertContainer) return;
+      alertContainer.innerHTML = `
+        <div class="alert alert-danger alert-dismissible fade show shadow-sm" role="alert">
+          <i class="fa-solid fa-circle-exclamation me-2"></i>
+          <span>${msg}</span>
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+      `;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function clearAlert() {
+      if (alertContainer) {
+        alertContainer.innerHTML = '';
+      }
+    }
+
+    function validateFile() {
+      if (!fileInput || !fileInput.files || fileInput.files.length === 0) return true;
+      const file = fileInput.files[0];
+      if (file.size > maxBytes) {
+        const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+        showAlert(`File size (${sizeMb} MB) exceeds the maximum allowed limit of ${maxMb} MB. Please choose a smaller document.`);
+        fileInput.value = '';
+        return false;
+      }
+      clearAlert();
+      return true;
+    }
+
+    if (fileInput) {
+      fileInput.addEventListener('change', validateFile);
+    }
+
+    if (form) {
+      form.addEventListener('submit', function(e) {
+        if (!validateFile()) {
+          e.preventDefault();
+          return false;
+        }
+        
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Uploading & indexing...';
+        }
+      });
+    }
+  });
+</script>
 
 {% endblock %}
