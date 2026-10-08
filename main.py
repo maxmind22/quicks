@@ -31,7 +31,12 @@ try:
 except OSError:
     pass
 
-app = Flask(__name__)
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+app = Flask(
+    __name__,
+    template_folder=os.path.join(BASE_DIR, 'templates'),
+    static_folder=os.path.join(BASE_DIR, 'static')
+)
 
 # Secret key: load from environment or use stable default for session persistence in serverless
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'quicks-session-secret-key-change-in-production')
