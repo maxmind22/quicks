@@ -199,11 +199,11 @@ with app.app_context():
     except Exception as e:
         print(f"Database initialization info: {e}")
 
-@app.route('/')
 @app.route('/api/index.py')
 @app.route('/api/index')
 @app.route('/api')
 @app.route('/index.py')
+@app.route('/')
 def home():
     return render_template("index.html")
 
@@ -368,6 +368,7 @@ def logout():
     return redirect(url_for("home"))
 
 @app.route('/api/cleanup', methods=['GET', 'POST'])
+@app.route('/cleanup', methods=['GET', 'POST'])
 def cleanup_endpoint():
     """Endpoint for Vercel Cron or manual pings to purge documents older than 24h."""
     purged = purge_expired_documents()
