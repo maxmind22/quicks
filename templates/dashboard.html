@@ -12,27 +12,18 @@
     </div>
 
     {% if usage %}
-    <div class="demo-notice-badge p-2 my-2 rounded border" style="background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.35) !important; font-size: 0.78rem; line-height: 1.35;">
-      <i class="fa-solid fa-triangle-exclamation text-warning me-1"></i>
-      <strong>Demo Mode:</strong> All files & embeddings are automatically deleted after <strong>{{ usage.auto_delete_hours }} hours</strong>.
-    </div>
-
-    <div class="usage-quota-box p-2 mb-2 rounded border" style="background: rgba(255, 255, 255, 0.4); font-size: 0.82rem;">
+    <div class="usage-quota-box p-2 my-2 rounded border" style="background: rgba(255, 255, 255, 0.4); font-size: 0.82rem;">
       <div class="d-flex justify-content-between align-items-center mb-1">
         <span class="text-muted"><i class="fa-solid fa-file me-1 text-primary"></i> Documents:</span>
         <span class="badge {% if usage.doc_count >= usage.max_docs %}bg-warning text-dark{% else %}bg-primary{% endif %}">
           {{ usage.doc_count }} / {{ usage.max_docs }}
         </span>
       </div>
-      <div class="d-flex justify-content-between align-items-center mb-1">
+      <div class="d-flex justify-content-between align-items-center">
         <span class="text-muted"><i class="fa-solid fa-comment-dots me-1 text-success"></i> Daily Searches:</span>
         <span id="daily-queries-badge" class="badge {% if usage.queries_today >= usage.max_queries %}bg-danger{% else %}bg-info text-dark{% endif %}">
           {{ usage.queries_today }} / {{ usage.max_queries }}
         </span>
-      </div>
-      <div class="d-flex justify-content-between align-items-center">
-        <span class="text-muted"><i class="fa-regular fa-clock me-1 text-warning"></i> File Retention:</span>
-        <span class="badge bg-warning text-dark">{{ usage.auto_delete_hours }} Hours</span>
       </div>
       <div class="text-muted text-end mt-1" style="font-size: 0.72rem;">
         Resets 00:00 UTC &bull; Max {{ usage.max_file_size_mb }}MB/file

@@ -21,18 +21,12 @@
   <h2 class="mb-4 text-center form-card-title"><i class="fa-solid fa-cloud-arrow-up me-2 text-primary"></i>Upload Documents</h2>
   <p class="text-muted text-center mb-3" style="line-height: 1.6;">Supported formats: <strong class="text-main">PDF</strong> and <strong class="text-main">TXT</strong>. Uploaded files will be processed, chunked, and embedded into your isolated index space.</p>
   
-  <div class="alert alert-warning py-2 px-3 mb-3 rounded border text-start" style="font-size: 0.82rem; background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.35) !important;">
-    <i class="fa-solid fa-triangle-exclamation text-warning me-1"></i>
-    <strong>Demo Mode:</strong> All uploaded files and their embeddings are automatically deleted after <strong>{{ auto_delete_hours }} hours</strong>.
-  </div>
-  
   <div class="p-3 mb-4 rounded border" style="background: rgba(var(--bg-card-rgb, 255,255,255), 0.5); font-size: 0.85rem; line-height: 1.5;">
     <div class="fw-bold mb-1 text-primary"><i class="fa-solid fa-shield-halved me-1"></i> Account Usage Limits:</div>
     <ul class="mb-0 ps-3 text-muted">
       <li><strong>Documents:</strong> {{ doc_count }} / {{ max_docs }} stored {% if doc_count >= max_docs %}<span class="badge bg-warning text-dark ms-1">Limit reached</span>{% endif %}</li>
       <li><strong>Max File Size:</strong> {{ max_file_size_mb }} MB per file</li>
       <li><strong>Length:</strong> Up to {{ max_chunks }} text chunks (~15-20 pages)</li>
-      <li><strong>Retention:</strong> <span class="badge bg-warning text-dark"><i class="fa-regular fa-clock me-1"></i>{{ auto_delete_hours }}-Hour Auto-Delete</span> (Demo app: files & embeddings expire after {{ auto_delete_hours }}h)</li>
     </ul>
   </div>
 
