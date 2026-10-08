@@ -19,7 +19,7 @@ Designed with a premium **dark-themed glassmorphism** user interface and built-i
 ## 🛠️ Technology Stack
 
 * **Backend**: Flask, Flask-Login, Flask-SQLAlchemy (SQLite database), WTForms
-* **AI/RAG Engine**: LangChain, OpenAI Embeddings (`text-embedding-3-small`), GPT-4o-Mini (`gpt-4o-mini`), Pinecone Client SDK
+* **AI/RAG Engine**: Google Gemini API (`gemini-embedding-001` with 768 dimensions & `gemini-flash`), Pinecone Vector Database, LangChain document loaders
 * **Frontend**: HTML5, Vanilla CSS3 (Custom Glassmorphism system), Bootstrap 5.3.0, FontAwesome 6, jQuery AJAX
 
 ---
@@ -54,14 +54,14 @@ You need to set up your API keys to enable embedding generation and OpenAI chat 
 
 **On Windows (PowerShell):**
 ```powershell
-$env:OPENAI_API_KEY="your-openai-api-key"
+$env:GEMINI_API_KEY="your-gemini-api-key"
 $env:PINECONE_API_KEY="your-pinecone-api-key"
 $env:PINECONE_ENVIRONMENT="your-pinecone-environment-name"
 ```
 
 **On macOS/Linux:**
 ```bash
-export OPENAI_API_KEY="your-openai-api-key"
+export GEMINI_API_KEY="your-gemini-api-key"
 export PINECONE_API_KEY="your-pinecone-api-key"
 export PINECONE_ENVIRONMENT="your-pinecone-environment-name"
 ```
@@ -98,7 +98,7 @@ git push origin master
 Under **Project Settings > Environment Variables**, add:
 * `SECRET_KEY`: A random secure string for session encryption.
 * `DATABASE_URL`: A PostgreSQL database connection string (e.g. from [Neon](https://neon.tech) or [Supabase](https://supabase.com)).
-* `OPENAI_API_KEY`: Your OpenAI API key for embeddings and GPT responses.
+* `GEMINI_API_KEY`: Your Google Gemini API key (from [Google AI Studio](https://aistudio.google.com/)).
 * `PINECONE_API_KEY`: Your Pinecone API key.
 * `PINECONE_ENVIRONMENT`: Your Pinecone index region/environment name.
 

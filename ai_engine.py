@@ -1,20 +1,139 @@
 import os
 import secrets
+import requests
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_classic.chains.question_answering import load_qa_chain
 from pinecone import Pinecone as PineconeClient
 from langchain_core.documents import Document
 
 # Index Configuration
-INDEX_NAME = 'demo-index'
+INDEX_NAME = os.environ.get('PINECONE_INDEX_NAME', 'demo-index')
+
+def get_api_key():
+    """Returns the Google Gemini API key from environment."""
+    return os.environ.get('GOOGLE_API_KEY') or os.environ.get('GEMINI_API_KEY') or os.environ.get('OPENAI_API_KEY')
+
+def check_credentials():
+    """Checks if required API keys are present in the environment."""
+    has_gemini = bool(get_api_key())
+    has_pinecone = bool(os.environ.get('PINECONE_API_KEY'))
+    return has_gemini and has_pinecone
+
+class GeminiEmbeddings:
+    """
+    Lightweight, dependency-free Google Gemini Embeddings client using gemini-embedding-001.
+    Produces 768-dimensional embeddings via Google AI Studio API.
+    """
+    def __init__(self, api_key=None, model="gemini-embedding-001"):
+        self.api_key = api_key or get_api_key()
+        if not self.api_key:
+            raise ValueError("GOOGLE_API_KEY (or GEMINI_API_KEY) environment variable is missing.")
+        self.model = model
+        self.endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:embedContent?key={self.api_key}"
+        self.batch_endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:batchEmbedContents?key={self.api_key}"
+
+    def embed_query(self, text: str):
+        payload = {
+            "model": f"models/{self.model}",
+            "content": {"parts": [{"text": text}]},
+            "outputDimensionality": 768
+        }
+        resp = requests.post(self.endpoint, json=payload, timeout=20)
+        if resp.status_code != 200:
+            raise RuntimeError(f"Gemini Embedding API Error ({resp.status_code}): {resp.text}")
+        data = resp.json()
+        return data["embedding"]["values"]
+
+    def embed_documents(self, texts: list):
+        if not texts:
+            return []
+        all_embeddings = []
+        batch_size = 50
+        for i in range(0, len(texts), batch_size):
+            chunk = texts[i:i + batch_size]
+            payload = {
+                "requests": [
+                    {
+                        "model": f"models/{self.model}",
+                        "content": {"parts": [{"text": t}]},
+                        "outputDimensionality": 768
+                    }
+                    for t in chunk
+                ]
+            }
+            resp = requests.post(self.batch_endpoint, json=payload, timeout=30)
+            if resp.status_code != 200:
+                raise RuntimeError(f"Gemini Batch Embedding API Error ({resp.status_code}): {resp.text}")
+            data = resp.json()
+            for item in data.get("embeddings", []):
+                all_embeddings.append(item["values"])
+        return all_embeddings
+
+class GeminiLLM:
+    """
+    Lightweight Google Gemini LLM client for answering questions based on document context.
+    Uses Google AI Studio API with automatic fallback across Flash models.
+    """
+    MODELS = ["gemini-flash-latest", "gemini-3.5-flash", "gemini-3.8-flash", "gemini-3.7-flash"]
+
+    def __init__(self, api_key=None):
+        self.api_key = api_key or get_api_key()
+        if not self.api_key:
+            raise ValueError("GOOGLE_API_KEY (or GEMINI_API_KEY) environment variable is missing.")
+
+    def answer_question(self, query: str, context_documents: list):
+        context_parts = []
+        for i, doc in enumerate(context_documents):
+            source = doc.metadata.get("filename") or os.path.basename(doc.metadata.get("source", "")) or f"Document {i+1}"
+            context_parts.append(f"--- Document Source: {source} ---\n{doc.page_content}")
+            
+        context_text = "\n\n".join(context_parts)
+        prompt = (
+            "You are Quicks AI, an intelligent, helpful document assistant. "
+            "Answer the user's question accurately and concisely based strictly on the provided document excerpts. "
+            "If the answer cannot be found in the context, clearly explain that the uploaded documents do not contain that information.\n\n"
+            f"Context Documents:\n{context_text}\n\n"
+            f"User Question: {query}\n\n"
+            "Answer:"
+        )
+
+        payload = {
+            "contents": [
+                {
+                    "parts": [{"text": prompt}]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.2,
+                "maxOutputTokens": 1024
+            }
+        }
+
+        last_error = None
+        for model in self.MODELS:
+            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
+            try:
+                resp = requests.post(endpoint, json=payload, timeout=25)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates and "content" in candidates[0]:
+                        parts = candidates[0]["content"].get("parts", [])
+                        if parts and "text" in parts[0]:
+                            return parts[0]["text"].strip()
+                else:
+                    last_error = f"Model {model} returned {resp.status_code}: {resp.text}"
+            except Exception as e:
+                last_error = str(e)
+
+        if last_error:
+            raise RuntimeError(f"Gemini API Error: {last_error}")
+        return "Unable to generate an answer from the document context."
 
 class SimplePineconeVectorStore:
     """
-    A custom Pinecone Vector Store wrapper to replace langchain-pinecone.
-    Provides compatibility for modern Python environments (like Python 3.14) 
-    without heavy C-extensions or deprecated community integrations.
+    Pinecone Vector Store wrapper providing multi-tenancy scoping and zero-dependency integration.
+    Compatible with Python 3.14, Vercel Serverless, and Gemini 768-dimensional embeddings.
     """
     def __init__(self, index_name, embeddings, namespace):
         self.index_name = index_name
@@ -28,21 +147,21 @@ class SimplePineconeVectorStore:
         pc = PineconeClient(api_key=os.environ.get('PINECONE_API_KEY'))
         
         # Verify index exists
-        if index_name not in pc.list_indexes().names():
+        existing_indexes = pc.list_indexes().names()
+        if index_name not in existing_indexes:
             raise ValueError(
                 f"Pinecone index '{index_name}' was not found. "
-                "Please create it on your Pinecone dashboard with 1536 dimensions and cosine metric."
+                "Please create it on your Pinecone dashboard with 768 dimensions (for Gemini text-embedding-004) and cosine metric."
             )
             
         index = pc.Index(index_name)
         
-        # Batch embed and upsert document chunks
+        # Batch embed document chunks via Gemini
+        texts_to_embed = [doc.page_content for doc in docs]
+        embedded_vectors = embeddings.embed_documents(texts_to_embed)
+        
         vectors_to_upsert = []
-        for i, doc in enumerate(docs):
-            # Compute embeddings via OpenAI
-            embedding = embeddings.embed_query(doc.page_content)
-            
-            # Generate unique ID and bundle metadata
+        for i, (doc, embedding) in enumerate(zip(docs, embedded_vectors)):
             source_path = doc.metadata.get("source", "")
             base_filename = os.path.basename(source_path) if source_path else ""
             vector_id = f"{namespace}_{i}_{secrets.token_hex(4)}"
@@ -68,10 +187,7 @@ class SimplePineconeVectorStore:
         return cls(index_name, embedding, namespace)
 
     def similarity_search(self, query, k=3):
-        # Embed query text
         query_vector = self.embeddings.embed_query(query)
-        
-        # Query Pinecone
         response = self.index.query(
             namespace=self.namespace,
             vector=query_vector,
@@ -79,7 +195,6 @@ class SimplePineconeVectorStore:
             include_metadata=True
         )
         
-        # Convert Pinecone results to LangChain Document objects
         docs = []
         for match in response.get("matches", []):
             metadata = match.get("metadata", {})
@@ -88,22 +203,13 @@ class SimplePineconeVectorStore:
             docs.append(doc)
         return docs
 
-
-def check_credentials():
-    """Checks if required API keys are present in the environment."""
-    return bool(os.environ.get('OPENAI_API_KEY') and os.environ.get('PINECONE_API_KEY'))
-
 def get_embeddings():
-    """Initializes and returns OpenAI Embeddings."""
-    if not os.environ.get('OPENAI_API_KEY'):
-        raise ValueError("OPENAI_API_KEY environment variable is missing.")
-    return OpenAIEmbeddings(model='text-embedding-3-small')
+    """Initializes and returns Gemini Embeddings."""
+    return GeminiEmbeddings()
 
 def get_llm():
-    """Initializes and returns ChatOpenAI model."""
-    if not os.environ.get('OPENAI_API_KEY'):
-        raise ValueError("OPENAI_API_KEY environment variable is missing.")
-    return ChatOpenAI(model='gpt-4o-mini')
+    """Initializes and returns Gemini LLM client."""
+    return GeminiLLM()
 
 def load_documents(directory, filename):
     """Loads a single document (PDF or Text) from directory."""
@@ -127,12 +233,11 @@ def split_documents(documents, chunk_size=1000, chunk_overlap=20):
 def save_embeddings(docs, user_id):
     """Saves document embeddings to Pinecone index under the user's namespace."""
     if not check_credentials():
-        raise ValueError("Credentials for OpenAI/Pinecone are not configured in environment.")
+        raise ValueError("Credentials for Gemini/Pinecone are not configured in environment.")
     
     embeddings = get_embeddings()
     namespace = f"user_{user_id}"
     
-    # Save documents using our custom vector store wrapper
     SimplePineconeVectorStore.from_documents(
         docs, 
         embeddings, 
@@ -144,7 +249,7 @@ def save_embeddings(docs, user_id):
 def query_index(query, user_id, k=3):
     """Queries the Pinecone index scoped to the user's namespace."""
     if not check_credentials():
-        raise ValueError("Credentials for OpenAI/Pinecone are not configured in environment.")
+        raise ValueError("Credentials for Gemini/Pinecone are not configured in environment.")
         
     embeddings = get_embeddings()
     namespace = f"user_{user_id}"
@@ -157,9 +262,9 @@ def query_index(query, user_id, k=3):
     return vectorstore.similarity_search(query, k=k)
 
 def get_answer(query, user_id):
-    """Executes RAG flow to fetch answer scoped to user's documents."""
+    """Executes RAG flow to fetch answer scoped to user's documents using Gemini."""
     if not check_credentials():
-        return "Configuration Error: OpenAI or Pinecone API keys are missing. Please set them in your environment variables."
+        return "Configuration Error: Google Gemini API key (GOOGLE_API_KEY) or Pinecone API key (PINECONE_API_KEY) is missing. Please set them in your environment variables."
         
     try:
         similar_docs = query_index(query, user_id)
@@ -167,8 +272,7 @@ def get_answer(query, user_id):
             return "I couldn't find any relevant information in your uploaded documents. Please upload some files first!"
             
         llm = get_llm()
-        chain = load_qa_chain(llm, chain_type="stuff")
-        answer = chain.run(input_documents=similar_docs, question=query)
+        answer = llm.answer_question(query, similar_docs)
         return answer
     except Exception as e:
         return f"An error occurred while answering: {str(e)}"

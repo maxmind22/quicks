@@ -2,6 +2,11 @@ import os
 import secrets
 from datetime import datetime
 from os.path import join
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 from flask import Flask, render_template, redirect, url_for, flash, request, jsonify
 from flask_bootstrap import Bootstrap5
 from flask_login import UserMixin, login_user, LoginManager, current_user, logout_user
@@ -33,8 +38,8 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'quicks-session-secret-k
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # Database configuration: support PostgreSQL (Neon/Supabase) via DATABASE_URL or SQLite fallback
-database_url = os.environ.get('DATABASE_URL')
-if database_url:
+database_url = (os.environ.get('DATABASE_URL') or '').strip()
+if database_url and any(database_url.startswith(scheme) for scheme in ("postgresql://", "postgres://", "sqlite://", "mysql://")):
     # Fix uri scheme for SQLAlchemy compatibility (postgres:// -> postgresql://)
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
@@ -156,7 +161,7 @@ def dashboard():
     # Check if API keys are set up
     credentials_ok = check_credentials()
     if not credentials_ok:
-        flash("OpenAI or Pinecone API keys are missing. Standard searches will be disabled. Please set them in your server environment.", "danger")
+        flash("Google Gemini or Pinecone API keys are missing. Standard searches will be disabled. Please set them in your server environment.", "danger")
         
     return render_template("dashboard.html", form=form, files=files, credentials_ok=credentials_ok)
 

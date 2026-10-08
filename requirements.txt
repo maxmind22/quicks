@@ -5,8 +5,9 @@ flask-sqlalchemy
 flask-wtf
 wtforms
 langchain
-langchain-openai
+requests
 langchain-community
 pinecone
 pypdf
 psycopg2-binary
+python-dotenv
