@@ -85,6 +85,44 @@ class Document(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class VercelPathMiddleware:
+    """
+    Normalizes WSGI PATH_INFO and SCRIPT_NAME for Vercel deployment.
+    Strips framework and rewrite prefixes (/api/index.py, /api/index, /api, /index.py, /main.py).
+    """
+    PREFIXES = (
+        '/api/index.py',
+        '/api/index',
+        '/api/main.py',
+        '/api/main',
+        '/api',
+        '/index.py',
+        '/index',
+        '/main.py',
+    )
+
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ, start_response):
+        environ['SCRIPT_NAME'] = ''
+        path = environ.get('PATH_INFO', '')
+        if not path or path == '/':
+            environ['PATH_INFO'] = '/'
+            return self.wsgi_app(environ, start_response)
+
+        for prefix in self.PREFIXES:
+            if path == prefix or path == prefix + '/':
+                environ['PATH_INFO'] = '/'
+                break
+            elif path.startswith(prefix + '/'):
+                stripped = path[len(prefix):]
+                environ['PATH_INFO'] = stripped if stripped.startswith('/') else '/' + stripped
+                break
+        return self.wsgi_app(environ, start_response)
+
+app.wsgi_app = VercelPathMiddleware(app.wsgi_app)
+
 with app.app_context():
     try:
         db.create_all()
@@ -92,8 +130,20 @@ with app.app_context():
         print(f"Database initialization info: {e}")
 
 @app.route('/')
+@app.route('/api/index.py')
+@app.route('/api/index')
+@app.route('/api')
+@app.route('/index.py')
 def home():
     return render_template("index.html")
+
+@app.route('/favicon.ico')
+def favicon():
+    return ('', 204)
+
+@app.errorhandler(404)
+def handle_404(e):
+    return render_template("index.html"), 404
 
 # Register users
 @app.route('/register', methods=['GET', 'POST'])
