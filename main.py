@@ -1,6 +1,6 @@
 import os
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from os.path import join
 from dotenv import load_dotenv
 
@@ -42,11 +42,12 @@ app = Flask(
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'quicks-session-secret-key-change-in-production')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Usage Limits Configuration (overridable via environment variables)
+# Usage & Demo Limits Configuration (overridable via environment variables)
 MAX_DOCS_PER_USER = int(os.environ.get('MAX_DOCS_PER_USER', 5))         # Max documents stored per user
 MAX_FILE_SIZE_MB = int(os.environ.get('MAX_FILE_SIZE_MB', 3))            # Max file upload size in MB (3 MB)
 MAX_CHUNKS_PER_FILE = int(os.environ.get('MAX_CHUNKS_PER_FILE', 25))     # Max chunks per document (~15-20 pages)
 MAX_QUERIES_PER_DAY = int(os.environ.get('MAX_QUERIES_PER_DAY', 30))     # Max daily AI searches per user
+AUTO_DELETE_HOURS = int(os.environ.get('AUTO_DELETE_HOURS', 24))         # Demo mode: auto-purge files after 24 hours
 
 app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE_MB * 1024 * 1024
 
@@ -108,6 +109,50 @@ def get_user_daily_query_count(user_id):
             QueryLog.created_at >= today_start
         ).count()
     except Exception:
+        return 0
+
+def purge_expired_documents(max_age_hours=None):
+    """
+    Deletes documents older than max_age_hours from PostgreSQL, Pinecone, and disk.
+    For this demo application, uploaded documents and their embeddings expire after 24 hours.
+    """
+    if max_age_hours is None:
+        max_age_hours = AUTO_DELETE_HOURS
+    try:
+        cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
+        expired_docs = Document.query.filter(Document.uploaded_at < cutoff).all()
+        if not expired_docs:
+            return 0
+        
+        purged = 0
+        for doc in expired_docs:
+            filename = doc.filename
+            user_id = doc.user_id
+            
+            # 1. Clear vectors from Pinecone
+            try:
+                delete_user_file_embeddings(filename, user_id)
+            except Exception as e:
+                print(f"Error purging embeddings for {filename}: {e}")
+                
+            # 2. Clear disk file if present
+            try:
+                user_upload_dir = join(app.config['UPLOAD_FOLDER'], f"user_{user_id}")
+                filepath = join(user_upload_dir, filename)
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            except Exception:
+                pass
+                
+            # 3. Remove from database
+            db.session.delete(doc)
+            purged += 1
+            
+        db.session.commit()
+        return purged
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error during expired documents purge: {e}")
         return 0
 
 class VercelPathMiddleware:
@@ -225,6 +270,9 @@ def dashboard():
     form = Search()
     user_upload_dir = join(app.config['UPLOAD_FOLDER'], f"user_{current_user.id}")
 
+    # Demo mode: purge any documents older than 24 hours
+    purge_expired_documents()
+
     # Backwards compatibility: sync existing local disk files to Document table
     if os.path.exists(user_upload_dir):
         disk_files = [f for f in os.listdir(user_upload_dir) if os.path.isfile(join(user_upload_dir, f))]
@@ -238,7 +286,26 @@ def dashboard():
 
     # Query persistent document list from database
     user_docs = Document.query.filter_by(user_id=current_user.id).order_by(Document.uploaded_at.desc()).all()
-    files = [doc.filename for doc in user_docs]
+    
+    # Calculate time remaining before automatic 24-hour expiration for each file
+    files = []
+    now = datetime.utcnow()
+    for doc in user_docs:
+        age_seconds = (now - doc.uploaded_at).total_seconds()
+        remaining_seconds = max(0, (AUTO_DELETE_HOURS * 3600) - age_seconds)
+        remaining_hours = int(remaining_seconds // 3600)
+        remaining_minutes = int((remaining_seconds % 3600) // 60)
+        
+        if remaining_hours >= 1:
+            time_left_str = f"{remaining_hours}h left"
+        else:
+            time_left_str = f"{remaining_minutes}m left"
+            
+        files.append({
+            "filename": doc.filename,
+            "uploaded_at": doc.uploaded_at,
+            "time_left": time_left_str
+        })
     
     # Check if API keys are set up
     credentials_ok = check_credentials()
@@ -254,7 +321,8 @@ def dashboard():
         "max_queries": MAX_QUERIES_PER_DAY,
         "remaining_queries": max(0, MAX_QUERIES_PER_DAY - queries_today),
         "max_file_size_mb": MAX_FILE_SIZE_MB,
-        "max_chunks": MAX_CHUNKS_PER_FILE
+        "max_chunks": MAX_CHUNKS_PER_FILE,
+        "auto_delete_hours": AUTO_DELETE_HOURS
     }
         
     return render_template("dashboard.html", form=form, files=files, credentials_ok=credentials_ok, usage=usage)
@@ -266,6 +334,9 @@ def search():
     if not query:
         return jsonify({"error": "Error: Empty query received."}), 400
     
+    # Demo mode: purge expired documents
+    purge_expired_documents()
+
     # Enforce daily query quota per user
     queries_today = get_user_daily_query_count(current_user.id)
     if queries_today >= MAX_QUERIES_PER_DAY:
@@ -296,6 +367,17 @@ def logout():
     flash("Successfully logged out.", "success")
     return redirect(url_for("home"))
 
+@app.route('/api/cleanup', methods=['GET', 'POST'])
+def cleanup_endpoint():
+    """Endpoint for Vercel Cron or manual pings to purge documents older than 24h."""
+    purged = purge_expired_documents()
+    return jsonify({
+        "status": "success",
+        "purged_documents": purged,
+        "retention_hours": AUTO_DELETE_HOURS,
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
 # File upload helpers
 def allowed_file(filename):
     return '.' in filename and \
@@ -311,6 +393,9 @@ def request_entity_too_large(error):
 def upload():
     form = Files()
     user_upload_dir = join(app.config['UPLOAD_FOLDER'], f"user_{current_user.id}")
+    
+    # Demo mode: purge expired documents before checking user quota
+    purge_expired_documents()
     doc_count = Document.query.filter_by(user_id=current_user.id).count()
     
     if request.method == 'POST':
@@ -394,7 +479,8 @@ def upload():
         doc_count=doc_count,
         max_docs=MAX_DOCS_PER_USER,
         max_file_size_mb=MAX_FILE_SIZE_MB,
-        max_chunks=MAX_CHUNKS_PER_FILE
+        max_chunks=MAX_CHUNKS_PER_FILE,
+        auto_delete_hours=AUTO_DELETE_HOURS
     )
 
 @app.route('/delete-file/<filename>', methods=['POST'])

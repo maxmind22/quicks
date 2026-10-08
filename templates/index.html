@@ -21,7 +21,12 @@
     <i class="fa-solid fa-bolt hero-icon"></i>
   </div>
   <h1 class="mb-3 hero-title">Welcome to Quicks</h1>
-  <p class="hero-description text-muted mb-4">An intelligent document search engine utilizing semantic embedding RAG technology to query your uploaded files instantly.</p>
+  <p class="hero-description text-muted mb-3">An intelligent document search engine utilizing semantic embedding RAG technology to query your uploaded files instantly.</p>
+  
+  <div class="alert alert-warning py-2 px-3 mx-auto mb-4 text-center rounded-pill shadow-sm" style="max-width: 490px; font-size: 0.82rem; background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.35) !important;">
+    <i class="fa-solid fa-clock-rotate-left me-1 text-warning"></i>
+    <strong>Demo Mode:</strong> Uploaded documents and vectors are automatically deleted after 24 hours.
+  </div>
   
   {% if not current_user.is_authenticated %}
     <div class="d-flex justify-content-center gap-3">
