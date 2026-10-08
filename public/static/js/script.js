@@ -61,6 +61,18 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="chat-bubble-text">${escapeHtml(answerText).replace(/\n/g, '<br>')}</div>
                     </div>
                 `;
+                
+                // Dynamically update query count badge
+                if (response && response.queries_today !== undefined) {
+                    const badge = document.getElementById('daily-queries-badge');
+                    if (badge) {
+                        badge.textContent = `${response.queries_today} / ${response.max_queries}`;
+                        if (response.queries_today >= response.max_queries) {
+                            badge.className = 'badge bg-danger';
+                        }
+                    }
+                }
+                
                 scrollToBottom();
             },
             error: (xhr, status, error) => {

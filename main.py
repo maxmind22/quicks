@@ -42,6 +42,14 @@ app = Flask(
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'quicks-session-secret-key-change-in-production')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
+# Usage Limits Configuration (overridable via environment variables)
+MAX_DOCS_PER_USER = int(os.environ.get('MAX_DOCS_PER_USER', 5))         # Max documents stored per user
+MAX_FILE_SIZE_MB = int(os.environ.get('MAX_FILE_SIZE_MB', 3))            # Max file upload size in MB (3 MB)
+MAX_CHUNKS_PER_FILE = int(os.environ.get('MAX_CHUNKS_PER_FILE', 25))     # Max chunks per document (~15-20 pages)
+MAX_QUERIES_PER_DAY = int(os.environ.get('MAX_QUERIES_PER_DAY', 30))     # Max daily AI searches per user
+
+app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE_MB * 1024 * 1024
+
 # Database configuration: support PostgreSQL (Neon/Supabase) via DATABASE_URL or SQLite fallback
 database_url = (os.environ.get('DATABASE_URL') or '').strip()
 if database_url and any(database_url.startswith(scheme) for scheme in ("postgresql://", "postgres://", "postgresql+psycopg2://", "sqlite://", "mysql://")):
@@ -77,6 +85,7 @@ class User(UserMixin, db.Model):
     email = db.Column(db.String(100), unique=True)
     password = db.Column(db.String(255))
     documents = db.relationship('Document', backref='owner', lazy=True, cascade="all, delete-orphan")
+    query_logs = db.relationship('QueryLog', backref='user', lazy=True, cascade="all, delete-orphan")
 
 class Document(db.Model):
     __tablename__ = "documents"
@@ -84,6 +93,22 @@ class Document(db.Model):
     filename = db.Column(db.String(255), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class QueryLog(db.Model):
+    __tablename__ = "query_logs"
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+def get_user_daily_query_count(user_id):
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        return QueryLog.query.filter(
+            QueryLog.user_id == user_id,
+            QueryLog.created_at >= today_start
+        ).count()
+    except Exception:
+        return 0
 
 class VercelPathMiddleware:
     """
@@ -220,18 +245,50 @@ def dashboard():
     if not credentials_ok:
         flash("Google Gemini or Pinecone API keys are missing. Standard searches will be disabled. Please set them in your server environment.", "danger")
         
-    return render_template("dashboard.html", form=form, files=files, credentials_ok=credentials_ok)
+    # Usage stats
+    queries_today = get_user_daily_query_count(current_user.id)
+    usage = {
+        "doc_count": len(files),
+        "max_docs": MAX_DOCS_PER_USER,
+        "queries_today": queries_today,
+        "max_queries": MAX_QUERIES_PER_DAY,
+        "remaining_queries": max(0, MAX_QUERIES_PER_DAY - queries_today),
+        "max_file_size_mb": MAX_FILE_SIZE_MB,
+        "max_chunks": MAX_CHUNKS_PER_FILE
+    }
+        
+    return render_template("dashboard.html", form=form, files=files, credentials_ok=credentials_ok, usage=usage)
 
 @app.route('/search', methods=['POST'])
 @must_login
 def search():
     query = request.form.get('query')
     if not query:
-        return jsonify("Error: Empty query received."), 400
+        return jsonify({"error": "Error: Empty query received."}), 400
     
+    # Enforce daily query quota per user
+    queries_today = get_user_daily_query_count(current_user.id)
+    if queries_today >= MAX_QUERIES_PER_DAY:
+        return jsonify({
+            "error": f"Daily AI search limit reached ({queries_today}/{MAX_QUERIES_PER_DAY} questions used today). Quota resets at 00:00 UTC."
+        }), 429
+
     # Process the query using RAG scoped to current user
     result = get_answer(query, current_user.id)
-    return jsonify(result)
+    
+    # Log successful query
+    try:
+        db.session.add(QueryLog(user_id=current_user.id))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    return jsonify({
+        "answer": result,
+        "queries_today": queries_today + 1,
+        "max_queries": MAX_QUERIES_PER_DAY,
+        "remaining_queries": max(0, MAX_QUERIES_PER_DAY - (queries_today + 1))
+    })
 
 @app.route('/logout')
 def logout():
@@ -244,13 +301,28 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    flash(f"File size exceeds the maximum allowed limit of {MAX_FILE_SIZE_MB} MB. Please upload a smaller document.", "danger")
+    return redirect(url_for('upload'))
+
 @app.route('/upload', methods=['GET', 'POST'])
 @must_login
 def upload():
     form = Files()
     user_upload_dir = join(app.config['UPLOAD_FOLDER'], f"user_{current_user.id}")
+    doc_count = Document.query.filter_by(user_id=current_user.id).count()
     
     if request.method == 'POST':
+        # Enforce maximum document count limit
+        if doc_count >= MAX_DOCS_PER_USER:
+            flash(
+                f"Document limit reached! You already have {doc_count}/{MAX_DOCS_PER_USER} documents. "
+                "Please delete an existing document from your dashboard before uploading a new one.",
+                "warning"
+            )
+            return redirect(url_for('dashboard'))
+
         if 'file' not in request.files:
             flash('No file selected.', 'warning')
             return redirect(request.url)
@@ -262,15 +334,39 @@ def upload():
             
         if file and allowed_file(file.filename):
             filename = secure_filename(file.filename)
+            
+            # Enforce file size limit
+            file.seek(0, os.SEEK_END)
+            file_size = file.tell()
+            file.seek(0)
+            if file_size > MAX_FILE_SIZE_MB * 1024 * 1024:
+                flash(f"File size ({file_size / (1024*1024):.1f} MB) exceeds maximum allowed limit of {MAX_FILE_SIZE_MB} MB. Please upload a smaller document.", "danger")
+                return redirect(request.url)
+            
             os.makedirs(user_upload_dir, exist_ok=True)
             filepath = join(user_upload_dir, filename)
             file.save(filepath)
 
             # Process and save embeddings into Pinecone
             try:
-                files = load_documents(user_upload_dir, filename)
-                docs = split_documents(files, chunk_size=1000, chunk_overlap=20)
-                if save_embeddings(docs, current_user.id):
+                raw_docs = load_documents(user_upload_dir, filename)
+                split_docs = split_documents(raw_docs, chunk_size=1000, chunk_overlap=20)
+                
+                # Enforce max chunks limit to prevent 429 rate limit exhaustion
+                if len(split_docs) > MAX_CHUNKS_PER_FILE:
+                    flash(
+                        f"Document contains {len(split_docs)} chunks, which exceeds the limit of {MAX_CHUNKS_PER_FILE} chunks (~15-20 pages). "
+                        "To avoid exhausting AI token quotas, please upload a shorter document or split it into sections.",
+                        "warning"
+                    )
+                    if os.path.exists(filepath):
+                        try:
+                            os.remove(filepath)
+                        except OSError:
+                            pass
+                    return redirect(request.url)
+
+                if save_embeddings(split_docs, current_user.id):
                     # Record persistent document tracking in database
                     if not Document.query.filter_by(user_id=current_user.id, filename=filename).first():
                         new_doc = Document(filename=filename, user_id=current_user.id)
@@ -292,7 +388,14 @@ def upload():
             flash('Invalid file format. Only PDF and TXT files are supported.', 'danger')
             return redirect(request.url)
             
-    return render_template("upload.html", form=form)
+    return render_template(
+        "upload.html", 
+        form=form,
+        doc_count=doc_count,
+        max_docs=MAX_DOCS_PER_USER,
+        max_file_size_mb=MAX_FILE_SIZE_MB,
+        max_chunks=MAX_CHUNKS_PER_FILE
+    )
 
 @app.route('/delete-file/<filename>', methods=['POST'])
 @must_login
