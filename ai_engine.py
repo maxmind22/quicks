@@ -1,4 +1,5 @@
 import os
+import json
 import secrets
 import time
 import requests
@@ -9,6 +10,35 @@ from langchain_core.documents import Document
 
 # Index Configuration
 INDEX_NAME = os.environ.get('PINECONE_INDEX_NAME', 'demo-index')
+
+# Global cached HTTP session with persistent connection pooling
+_http_session = None
+
+def get_http_session():
+    global _http_session
+    if _http_session is None:
+        _http_session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=15,
+            pool_maxsize=25,
+            max_retries=2
+        )
+        _http_session.mount("https://", adapter)
+        _http_session.mount("http://", adapter)
+    return _http_session
+
+# Global cached Pinecone Index client to avoid repeating costly control-plane calls
+_pinecone_index_instance = None
+
+def get_pinecone_index():
+    global _pinecone_index_instance
+    if _pinecone_index_instance is None:
+        api_key = os.environ.get('PINECONE_API_KEY')
+        if not api_key:
+            return None
+        pc = PineconeClient(api_key=api_key)
+        _pinecone_index_instance = pc.Index(INDEX_NAME)
+    return _pinecone_index_instance
 
 def get_api_key():
     """Returns the Google Gemini API key from environment."""
@@ -24,6 +54,7 @@ class GeminiEmbeddings:
     """
     Lightweight, dependency-free Google Gemini Embeddings client using gemini-embedding-001.
     Produces 768-dimensional embeddings via Google AI Studio API with automatic 429 rate limit backoff.
+    Reuses persistent HTTP sessions for minimal latency.
     """
     def __init__(self, api_key=None, model="gemini-embedding-001"):
         self.api_key = api_key or get_api_key()
@@ -39,9 +70,10 @@ class GeminiEmbeddings:
             "content": {"parts": [{"text": text}]},
             "outputDimensionality": 768
         }
+        session = get_http_session()
         max_retries = 3
         for attempt in range(max_retries):
-            resp = requests.post(self.endpoint, json=payload, timeout=20)
+            resp = session.post(self.endpoint, json=payload, timeout=20)
             if resp.status_code == 200:
                 data = resp.json()
                 return data["embedding"]["values"]
@@ -56,8 +88,9 @@ class GeminiEmbeddings:
         if not texts:
             return []
         all_embeddings = []
-        batch_size = 20  # Reduced batch size to respect the 30,000 TPM limit
+        batch_size = 20
         max_retries = 4
+        session = get_http_session()
 
         for i in range(0, len(texts), batch_size):
             chunk = texts[i:i + batch_size]
@@ -74,7 +107,7 @@ class GeminiEmbeddings:
 
             batch_succeeded = False
             for attempt in range(max_retries):
-                resp = requests.post(self.batch_endpoint, json=payload, timeout=30)
+                resp = session.post(self.batch_endpoint, json=payload, timeout=30)
                 if resp.status_code == 200:
                     data = resp.json()
                     for item in data.get("embeddings", []):
@@ -93,25 +126,26 @@ class GeminiEmbeddings:
                     "Please wait a moment before uploading large files, or split the document into smaller parts."
                 )
 
-            # Polite pause between batches to smooth out TPM/RPM bursts
+            # Only pause between batches if more than one batch is needed
             if i + batch_size < len(texts):
-                time.sleep(0.5)
+                time.sleep(0.3)
 
         return all_embeddings
 
 class GeminiLLM:
     """
-    Lightweight Google Gemini LLM client for answering questions based on document context.
-    Uses Google AI Studio API with automatic fallback across Flash models.
+    Ultra-fast Google Gemini LLM client for answering questions based on document context.
+    Prioritizes low-latency gemini-flash-lite-latest with fallback to gemini-flash-latest.
+    Supports both synchronous and SSE token streaming.
     """
-    MODELS = ["gemini-flash-latest", "gemini-3.5-flash", "gemini-3.8-flash", "gemini-3.7-flash"]
+    MODELS = ["gemini-flash-lite-latest", "gemini-flash-latest"]
 
     def __init__(self, api_key=None):
         self.api_key = api_key or get_api_key()
         if not self.api_key:
             raise ValueError("GOOGLE_API_KEY (or GEMINI_API_KEY) environment variable is missing.")
 
-    def answer_question(self, query: str, context_documents: list):
+    def _build_payload(self, query: str, context_documents: list):
         context_parts = []
         for i, doc in enumerate(context_documents):
             source = doc.metadata.get("filename") or os.path.basename(doc.metadata.get("source", "")) or f"Document {i+1}"
@@ -127,7 +161,7 @@ class GeminiLLM:
             "Answer:"
         )
 
-        payload = {
+        return {
             "contents": [
                 {
                     "parts": [{"text": prompt}]
@@ -139,11 +173,15 @@ class GeminiLLM:
             }
         }
 
+    def answer_question(self, query: str, context_documents: list):
+        payload = self._build_payload(query, context_documents)
+        session = get_http_session()
         last_error = None
+
         for model in self.MODELS:
             endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={self.api_key}"
             try:
-                resp = requests.post(endpoint, json=payload, timeout=25)
+                resp = session.post(endpoint, json=payload, timeout=25)
                 if resp.status_code == 200:
                     data = resp.json()
                     candidates = data.get("candidates", [])
@@ -160,6 +198,41 @@ class GeminiLLM:
             raise RuntimeError(f"Gemini API Error: {last_error}")
         return "Unable to generate an answer from the document context."
 
+    def stream_question(self, query: str, context_documents: list):
+        """Streams answer tokens in real-time using Gemini SSE endpoint."""
+        payload = self._build_payload(query, context_documents)
+        session = get_http_session()
+
+        for model in self.MODELS:
+            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse&key={self.api_key}"
+            try:
+                resp = session.post(endpoint, json=payload, stream=True, timeout=25)
+                if resp.status_code == 200:
+                    streamed_any = False
+                    for line in resp.iter_lines():
+                        if not line:
+                            continue
+                        line_str = line.decode('utf-8') if isinstance(line, bytes) else line
+                        if line_str.startswith('data: '):
+                            try:
+                                data = json.loads(line_str[6:])
+                                candidates = data.get('candidates', [])
+                                if candidates and 'content' in candidates[0]:
+                                    parts = candidates[0]['content'].get('parts', [])
+                                    for part in parts:
+                                        if 'text' in part and part['text']:
+                                            streamed_any = True
+                                            yield part['text']
+                            except Exception:
+                                continue
+                    if streamed_any:
+                        return
+            except Exception:
+                continue
+
+        # Fallback to synchronous generation if streaming was unavailable
+        yield self.answer_question(query, context_documents)
+
 class SimplePineconeVectorStore:
     """
     Pinecone Vector Store wrapper providing multi-tenancy scoping and zero-dependency integration.
@@ -169,23 +242,14 @@ class SimplePineconeVectorStore:
         self.index_name = index_name
         self.embeddings = embeddings
         self.namespace = namespace
-        pc = PineconeClient(api_key=os.environ.get('PINECONE_API_KEY'))
-        self.index = pc.Index(index_name)
+        self.index = get_pinecone_index()
 
     @classmethod
     def from_documents(cls, docs, embeddings, index_name, namespace):
-        pc = PineconeClient(api_key=os.environ.get('PINECONE_API_KEY'))
-        
-        # Verify index exists
-        existing_indexes = pc.list_indexes().names()
-        if index_name not in existing_indexes:
-            raise ValueError(
-                f"Pinecone index '{index_name}' was not found. "
-                "Please create it on your Pinecone dashboard with 768 dimensions (for Gemini text-embedding-004) and cosine metric."
-            )
+        index = get_pinecone_index()
+        if not index:
+            raise ValueError("Pinecone index could not be initialized. Please check PINECONE_API_KEY.")
             
-        index = pc.Index(index_name)
-        
         # Batch embed document chunks via Gemini
         texts_to_embed = [doc.page_content for doc in docs]
         embedded_vectors = embeddings.embed_documents(texts_to_embed)
@@ -307,13 +371,32 @@ def get_answer(query, user_id):
     except Exception as e:
         return f"An error occurred while answering: {str(e)}"
 
+def stream_answer(query, user_id):
+    """Executes RAG flow and yields streaming answer tokens scoped to user's documents using Gemini."""
+    if not check_credentials():
+        yield "Configuration Error: Google Gemini API key or Pinecone API key is missing. Please set them in your environment variables."
+        return
+        
+    try:
+        similar_docs = query_index(query, user_id)
+        if not similar_docs:
+            yield "I couldn't find any relevant information in your uploaded documents. Please upload some files first!"
+            return
+            
+        llm = get_llm()
+        for token in llm.stream_question(query, similar_docs):
+            yield token
+    except Exception as e:
+        yield f"An error occurred while answering: {str(e)}"
+
 def delete_user_file_embeddings(filename, user_id):
     """Deletes embeddings associated with a specific file from the user's Pinecone namespace."""
     if not check_credentials():
         return False
     try:
-        pc = PineconeClient(api_key=os.environ.get('PINECONE_API_KEY'))
-        index = pc.Index(INDEX_NAME)
+        index = get_pinecone_index()
+        if not index:
+            return False
         
         filepath = os.path.join('./static/uploads', f'user_{user_id}', filename)
         filepath_alt = filepath.replace('\\', '/')

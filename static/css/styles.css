@@ -766,3 +766,11 @@ input.form-control::placeholder {
     max-height: 350px;
   }
 }
+
+.text-stream-content {
+  display: inline-block;
+  min-height: 1.25rem;
+  line-height: 1.6;
+  word-break: break-word;
+}
+

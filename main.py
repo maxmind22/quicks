@@ -1,4 +1,6 @@
 import os
+import json
+import time
 import secrets
 from datetime import datetime, timedelta
 from os.path import join
@@ -7,7 +9,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-from flask import Flask, render_template, redirect, url_for, flash, request, jsonify
+from flask import Flask, render_template, redirect, url_for, flash, request, jsonify, Response, stream_with_context
 from flask_bootstrap import Bootstrap5
 from flask_login import UserMixin, login_user, LoginManager, current_user, logout_user
 from flask_sqlalchemy import SQLAlchemy
@@ -15,7 +17,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from forms import RegisterForm, LoginForm, Files, Search
 from decorators import must_login
-from ai_engine import split_documents, save_embeddings, load_documents, get_answer, delete_user_file_embeddings, check_credentials
+from ai_engine import split_documents, save_embeddings, load_documents, get_answer, stream_answer, delete_user_file_embeddings, check_credentials
 
 # Storage configuration (writable /tmp for serverless environments like Vercel)
 if os.environ.get('VERCEL'):
@@ -92,14 +94,14 @@ class Document(db.Model):
     __tablename__ = "documents"
     id = db.Column(db.Integer, primary_key=True)
     filename = db.Column(db.String(255), nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
 class QueryLog(db.Model):
     __tablename__ = "query_logs"
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
 def get_user_daily_query_count(user_id):
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -111,11 +113,20 @@ def get_user_daily_query_count(user_id):
     except Exception:
         return 0
 
-def purge_expired_documents(max_age_hours=None):
+_last_purge_timestamp = 0
+
+def purge_expired_documents(max_age_hours=None, force=False):
     """
     Deletes documents older than max_age_hours from PostgreSQL, Pinecone, and disk.
     For this demo application, uploaded documents and their embeddings expire after 24 hours.
+    Throttled to run at most once every 5 minutes during user requests, or instantly if force=True.
     """
+    global _last_purge_timestamp
+    now_ts = time.time()
+    if not force and (now_ts - _last_purge_timestamp < 300):
+        return 0
+    _last_purge_timestamp = now_ts
+
     if max_age_hours is None:
         max_age_hours = AUTO_DELETE_HOURS
     try:
@@ -361,6 +372,43 @@ def search():
         "remaining_queries": max(0, MAX_QUERIES_PER_DAY - (queries_today + 1))
     })
 
+@app.route('/search/stream', methods=['POST'])
+@must_login
+def search_stream():
+    query = request.form.get('query') or (request.json.get('query') if request.is_json else None)
+    if not query:
+        return jsonify({"error": "Error: Empty query received."}), 400
+    
+    # Periodic background cleanup check
+    purge_expired_documents()
+
+    # Enforce daily query quota per user
+    queries_today = get_user_daily_query_count(current_user.id)
+    if queries_today >= MAX_QUERIES_PER_DAY:
+        return jsonify({
+            "error": f"Daily AI search limit reached ({queries_today}/{MAX_QUERIES_PER_DAY} questions used today). Quota resets at 00:00 UTC."
+        }), 429
+
+    # Log successful query
+    try:
+        db.session.add(QueryLog(user_id=current_user.id))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+    def generate():
+        try:
+            for token in stream_answer(query, current_user.id):
+                yield f"data: {json.dumps({'token': token})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'queries_today': queries_today + 1, 'max_queries': MAX_QUERIES_PER_DAY})}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    response = Response(stream_with_context(generate()), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache, no-transform'
+    response.headers['X-Accel-Buffering'] = 'no'
+    return response
+
 @app.route('/logout')
 def logout():
     logout_user()
@@ -371,7 +419,7 @@ def logout():
 @app.route('/cleanup', methods=['GET', 'POST'])
 def cleanup_endpoint():
     """Endpoint for Vercel Cron or manual pings to purge documents older than 24h."""
-    purged = purge_expired_documents()
+    purged = purge_expired_documents(force=True)
     return jsonify({
         "status": "success",
         "purged_documents": purged,
