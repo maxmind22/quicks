@@ -1,5 +1,6 @@
 import os
 import secrets
+import time
 import requests
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -22,7 +23,7 @@ def check_credentials():
 class GeminiEmbeddings:
     """
     Lightweight, dependency-free Google Gemini Embeddings client using gemini-embedding-001.
-    Produces 768-dimensional embeddings via Google AI Studio API.
+    Produces 768-dimensional embeddings via Google AI Studio API with automatic 429 rate limit backoff.
     """
     def __init__(self, api_key=None, model="gemini-embedding-001"):
         self.api_key = api_key or get_api_key()
@@ -38,17 +39,26 @@ class GeminiEmbeddings:
             "content": {"parts": [{"text": text}]},
             "outputDimensionality": 768
         }
-        resp = requests.post(self.endpoint, json=payload, timeout=20)
-        if resp.status_code != 200:
-            raise RuntimeError(f"Gemini Embedding API Error ({resp.status_code}): {resp.text}")
-        data = resp.json()
-        return data["embedding"]["values"]
+        max_retries = 3
+        for attempt in range(max_retries):
+            resp = requests.post(self.endpoint, json=payload, timeout=20)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data["embedding"]["values"]
+            elif resp.status_code == 429:
+                wait_time = (2 ** attempt) * 2 + 1
+                time.sleep(wait_time)
+            else:
+                raise RuntimeError(f"Gemini Embedding API Error ({resp.status_code}): {resp.text}")
+        raise RuntimeError("Gemini Embedding rate limit exceeded for search query. Please wait a moment and try again.")
 
     def embed_documents(self, texts: list):
         if not texts:
             return []
         all_embeddings = []
-        batch_size = 50
+        batch_size = 20  # Reduced batch size to respect the 30,000 TPM limit
+        max_retries = 4
+
         for i in range(0, len(texts), batch_size):
             chunk = texts[i:i + batch_size]
             payload = {
@@ -61,12 +71,32 @@ class GeminiEmbeddings:
                     for t in chunk
                 ]
             }
-            resp = requests.post(self.batch_endpoint, json=payload, timeout=30)
-            if resp.status_code != 200:
-                raise RuntimeError(f"Gemini Batch Embedding API Error ({resp.status_code}): {resp.text}")
-            data = resp.json()
-            for item in data.get("embeddings", []):
-                all_embeddings.append(item["values"])
+
+            batch_succeeded = False
+            for attempt in range(max_retries):
+                resp = requests.post(self.batch_endpoint, json=payload, timeout=30)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for item in data.get("embeddings", []):
+                        all_embeddings.append(item["values"])
+                    batch_succeeded = True
+                    break
+                elif resp.status_code == 429:
+                    wait_time = (2 ** attempt) * 2 + 1  # 3s, 5s, 9s, 17s
+                    time.sleep(wait_time)
+                else:
+                    raise RuntimeError(f"Gemini Batch Embedding API Error ({resp.status_code}): {resp.text}")
+
+            if not batch_succeeded:
+                raise RuntimeError(
+                    "Gemini API rate limit reached (30,000 tokens/minute on free tier). "
+                    "Please wait a moment before uploading large files, or split the document into smaller parts."
+                )
+
+            # Polite pause between batches to smooth out TPM/RPM bursts
+            if i + batch_size < len(texts):
+                time.sleep(0.5)
+
         return all_embeddings
 
 class GeminiLLM:
