@@ -39,10 +39,12 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # Database configuration: support PostgreSQL (Neon/Supabase) via DATABASE_URL or SQLite fallback
 database_url = (os.environ.get('DATABASE_URL') or '').strip()
-if database_url and any(database_url.startswith(scheme) for scheme in ("postgresql://", "postgres://", "sqlite://", "mysql://")):
-    # Fix uri scheme for SQLAlchemy compatibility (postgres:// -> postgresql://)
+if database_url and any(database_url.startswith(scheme) for scheme in ("postgresql://", "postgres://", "postgresql+psycopg2://", "sqlite://", "mysql://")):
+    # Fix uri scheme for SQLAlchemy 2.0 + psycopg2 compatibility
     if database_url.startswith("postgres://"):
-        database_url = database_url.replace("postgres://", "postgresql://", 1)
+        database_url = database_url.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif database_url.startswith("postgresql://") and not database_url.startswith("postgresql+"):
+        database_url = database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 elif os.environ.get('VERCEL'):
     # Default to /tmp SQLite on Vercel if external database is not yet configured
