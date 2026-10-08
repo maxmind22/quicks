@@ -13,6 +13,7 @@ from flask import Flask, render_template, redirect, url_for, flash, request, jso
 from flask_bootstrap import Bootstrap5
 from flask_login import UserMixin, login_user, LoginManager, current_user, logout_user
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from forms import RegisterForm, LoginForm, Files, Search
@@ -70,8 +71,41 @@ else:
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
+# Ensure connection resiliency on serverless platforms (Neon, Supabase, AWS RDS)
+if app.config.get('SQLALCHEMY_DATABASE_URI', '').startswith("postgresql"):
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        "pool_pre_ping": True,       # Tests connection liveness before queries; transparently reconnects on closed SSL
+        "pool_recycle": 280,        # Recycles connections under 5 minutes before database idle timeout
+        "pool_size": 5,             # Safe pool size for serverless function concurrency
+        "max_overflow": 10,
+        "connect_args": {
+            "connect_timeout": 15,
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
+        }
+    }
+else:
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        "pool_pre_ping": True,
+    }
+
 db = SQLAlchemy()
 db.init_app(app)
+
+@app.teardown_request
+def teardown_request_handler(exception=None):
+    """Ensures database connections and transactions are cleanly returned to the pool after each request."""
+    if exception is not None:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+    try:
+        db.session.remove()
+    except Exception:
+        pass
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -237,7 +271,13 @@ def register():
             form.password.data,
             method='scrypt'
         )
-        if User.query.filter_by(email=form.email.data).first():
+        try:
+            existing_user = User.query.filter_by(email=form.email.data).first()
+        except (OperationalError, SQLAlchemyError):
+            db.session.rollback()
+            existing_user = User.query.filter_by(email=form.email.data).first()
+
+        if existing_user:
             flash("You've already signed up with that email. Please login.", "warning")
             return redirect(url_for("register"))
         new_user = User(
@@ -245,8 +285,13 @@ def register():
             email=form.email.data,
             password=hashed_pass,
         )
-        db.session.add(new_user)
-        db.session.commit()
+        try:
+            db.session.add(new_user)
+            db.session.commit()
+        except (OperationalError, SQLAlchemyError):
+            db.session.rollback()
+            db.session.add(new_user)
+            db.session.commit()
         flash("Successfully registered! Please login.", "success")
         return redirect(url_for("login"))
     return render_template("register.html", form=form)
@@ -254,7 +299,13 @@ def register():
 # Login users
 @login_manager.user_loader
 def load_user(user_id):
-    return db.session.get(User, int(user_id))
+    try:
+        return db.session.get(User, int(user_id))
+    except (OperationalError, SQLAlchemyError):
+        db.session.rollback()
+        return db.session.get(User, int(user_id))
+    except Exception:
+        return None
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -262,7 +313,11 @@ def login():
         return redirect(url_for('dashboard'))
     form = LoginForm()
     if form.validate_on_submit():
-        user = User.query.filter_by(email=form.email.data).first()
+        try:
+            user = User.query.filter_by(email=form.email.data).first()
+        except (OperationalError, SQLAlchemyError):
+            db.session.rollback()
+            user = User.query.filter_by(email=form.email.data).first()
         if not user:
             flash("That email does not exist. Please check your credentials or register.", "warning")
             return redirect(url_for("login"))
