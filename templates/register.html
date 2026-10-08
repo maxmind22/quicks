@@ -2,18 +2,18 @@
 {% extends "base.html" %}
 {% block content %}
 
-<div class="box glass-card text-start">
-  <h2 class="mb-4 text-center"><i class="fa-solid fa-user-plus me-2 text-primary"></i>Register</h2>
+<div class="box glass-card text-start" style="max-width: 440px;">
+  <h2 class="mb-4 text-center form-card-title"><i class="fa-solid fa-user-plus me-2 text-primary"></i>Register</h2>
   
-  {{ render_form(form, novalidate=True, button_map={"submit": "primary w-100 py-2"}) }}
+  {{ render_form(form, novalidate=True, button_map={"submit": "primary w-100 py-2 fw-semibold"}) }}
   
   <div class="mt-4 text-center">
     <span class="text-muted">Already registered?</span>
-    <a href="{{ url_for('login') }}" class="ms-1">Login here</a>
+    <a href="{{ url_for('login') }}" class="ms-1 fw-semibold">Login here</a>
   </div>
 </div>
 
-<div class="max-width-500 mx-auto mt-4" style="max-width: 400px;">
+<div class="max-width-500 mx-auto mt-4" style="max-width: 440px;">
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       {% for category, message in messages %}

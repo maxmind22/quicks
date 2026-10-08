@@ -1,7 +1,7 @@
 import py_compile
 import sys
 
-files_to_check = ['main.py', 'ai_engine.py', 'decorators.py', 'forms.py']
+files_to_check = ['main.py', 'ai_engine.py', 'decorators.py', 'forms.py', 'api/index.py']
 success = True
 
 print("Checking files for syntax errors...")

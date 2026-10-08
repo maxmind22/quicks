@@ -78,6 +78,32 @@ Open [http://127.0.0.1:5000](http://127.0.0.1:5000) in your web browser to test 
 
 ---
 
+## ⚡ Deploy to Vercel
+
+Quicks is configured for 1-click deployment on Vercel via Serverless Functions.
+
+### 1. Push your code to GitHub
+```bash
+git add .
+git commit -m "Configure Vercel serverless deployment"
+git push origin master
+```
+
+### 2. Import into Vercel
+1. Go to [vercel.com](https://vercel.com) and click **"Add New Project"**.
+2. Select your `quicks` repository.
+3. Keep the default settings (Vercel will detect the Python runtime via `vercel.json` and `api/index.py`).
+
+### 3. Configure Environment Variables in Vercel
+Under **Project Settings > Environment Variables**, add:
+* `SECRET_KEY`: A random secure string for session encryption.
+* `DATABASE_URL`: A PostgreSQL database connection string (e.g. from [Neon](https://neon.tech) or [Supabase](https://supabase.com)).
+* `OPENAI_API_KEY`: Your OpenAI API key for embeddings and GPT responses.
+* `PINECONE_API_KEY`: Your Pinecone API key.
+* `PINECONE_ENVIRONMENT`: Your Pinecone index region/environment name.
+
+---
+
 ## 📁 Repository Structure
 ```text
 quicks/

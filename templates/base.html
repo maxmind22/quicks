@@ -1,10 +1,17 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Quicks - AI Document Search</title>
+    <!-- Prevent theme flicker -->
+    <script>
+      (function() {
+        const savedTheme = localStorage.getItem('quicks-theme') || 'light';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+      })();
+    </script>
     <!-- Bootstrap 5 CSS -->
     <link
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
@@ -18,19 +25,21 @@
     <!-- Google Fonts: Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link
       rel="stylesheet"
-      href="{{ url_for('static', filename='css/styles.css')}}"
+      href="{{ url_for('static', filename='css/styles.css') }}"
     />
     <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
   </head>
 
   <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-transparent border-bottom border-secondary border-opacity-10 py-3">
+    <nav class="navbar navbar-expand-lg app-navbar py-3 sticky-top">
       <div class="container-fluid px-4">
         <a class="navbar-brand d-flex align-items-center" href="/">
-          <i class="fa-solid fa-bolt text-warning me-2"></i>
+          <div class="brand-icon-wrapper me-2">
+            <i class="fa-solid fa-bolt brand-icon"></i>
+          </div>
           <span class="logo-text">Quicks</span>
         </a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
@@ -47,7 +56,7 @@
               <a class="nav-link px-3" href="{{ url_for('login') }}">Login</a>
             </li>
             <li class="nav-item">
-              <a class="btn btn-outline-light btn-sm px-3 ms-2" href="{{ url_for('register') }}">Register</a>
+              <a class="btn btn-outline-primary btn-sm px-3 ms-2" href="{{ url_for('register') }}">Register</a>
             </li>
            
             {% else: %}
@@ -59,13 +68,20 @@
             </li>
             <li class="nav-item ms-lg-3">
               <div class="d-flex align-items-center">
-                <span class="navbar-text me-3 text-light opacity-75">
-                  <i class="fa-regular fa-user me-1 text-info"></i> {{ current_user.name }}
+                <span class="navbar-user-badge me-3">
+                  <i class="fa-regular fa-user me-1 text-primary"></i> {{ current_user.name }}
                 </span>
                 <a class="btn btn-danger btn-sm px-3" href="{{ url_for('logout') }}">Log Out</a>
               </div>
             </li>
             {% endif %}
+
+            <!-- Theme Toggle Button -->
+            <li class="nav-item ms-lg-2 mt-2 mt-lg-0">
+              <button id="theme-toggle-btn" class="theme-toggle-btn" type="button" aria-label="Toggle clear or dark theme" title="Toggle theme">
+                <i class="fa-solid fa-moon" id="theme-icon"></i>
+              </button>
+            </li>
           </ul>
         </div>
       </div>
@@ -77,5 +93,36 @@
 
     <!-- Bootstrap 5 JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Global Theme Switcher Script -->
+    <script>
+      (function() {
+        const toggleBtn = document.getElementById('theme-toggle-btn');
+        const themeIcon = document.getElementById('theme-icon');
+        if (!toggleBtn) return;
+
+        function updateIcon(theme) {
+          if (!themeIcon) return;
+          if (theme === 'dark') {
+            themeIcon.className = 'fa-solid fa-sun text-warning';
+            toggleBtn.setAttribute('title', 'Switch to clear theme');
+          } else {
+            themeIcon.className = 'fa-solid fa-moon';
+            toggleBtn.setAttribute('title', 'Switch to dark theme');
+          }
+        }
+
+        const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+        updateIcon(currentTheme);
+
+        toggleBtn.addEventListener('click', function() {
+          const active = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+          const next = active === 'dark' ? 'light' : 'dark';
+          document.documentElement.setAttribute('data-theme', next);
+          localStorage.setItem('quicks-theme', next);
+          updateIcon(next);
+        });
+      })();
+    </script>
   </body>
 </html>

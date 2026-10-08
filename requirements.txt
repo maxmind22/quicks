@@ -7,5 +7,6 @@ wtforms
 langchain
 langchain-openai
 langchain-community
-pinecone-client
+pinecone
 pypdf
+psycopg2-binary

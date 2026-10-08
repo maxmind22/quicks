@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     const submitBtn = document.getElementById('submit');
-    const inputField = document.querySelector('.form-control');
+    const inputField = document.getElementById('search-input') || document.querySelector('.form-control');
     const resultsContainer = document.querySelector('.results');
 
     if (!submitBtn || !inputField || !resultsContainer) {
@@ -19,11 +19,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const userBubble = document.createElement("div");
         userBubble.classList.add("chat-message-right", "pb-4");
         userBubble.innerHTML = `
-            <div>
-                <div class="flex-shrink-1 bg-primary text-white rounded py-2 px-3 mr-3 max-width-70 shadow-sm">
-                    <div class="font-weight-bold mb-1 text-right">You</div>
-                    ${escapeHtml(queryText)}
-                </div>
+            <div class="chat-bubble chat-bubble-user">
+                <div class="chat-bubble-author text-end mb-1">You</div>
+                <div class="chat-bubble-text">${escapeHtml(queryText)}</div>
             </div>
         `;
         resultsContainer.appendChild(userBubble);
@@ -37,13 +35,11 @@ document.addEventListener('DOMContentLoaded', () => {
         botBubble.classList.add("chat-message-left", "pb-4");
         
         const loadingHtml = `
-            <div>
-                <div class="flex-shrink-1 bg-dark text-light rounded py-2 px-3 ml-3 max-width-70 shadow-sm border border-secondary">
-                    <div class="font-weight-bold mb-1">Quicks AI</div>
-                    <div class="d-flex align-items-center">
-                        <span class="spinner-border spinner-border-sm mr-2" role="status" aria-hidden="true"></span>
-                        Thinking...
-                    </div>
+            <div class="chat-bubble chat-bubble-ai">
+                <div class="chat-bubble-author mb-1"><i class="fa-solid fa-robot me-1"></i>Quicks AI</div>
+                <div class="d-flex align-items-center">
+                    <span class="spinner-border spinner-border-sm me-2 text-primary" role="status" aria-hidden="true"></span>
+                    <span>Searching documents & thinking...</span>
                 </div>
             </div>
         `;
@@ -55,16 +51,14 @@ document.addEventListener('DOMContentLoaded', () => {
         $.ajax({
             url: "/search",
             type: "POST",
-            data: { query: queryText }, // Send raw query text (fixes the JSON double-quoting bug)
+            data: { query: queryText },
             success: (response) => {
                 // Update bot bubble with actual response
                 const answerText = typeof response === 'string' ? response : (response.answer || JSON.stringify(response));
                 botBubble.innerHTML = `
-                    <div>
-                        <div class="flex-shrink-1 bg-dark text-light rounded py-2 px-3 ml-3 max-width-70 shadow-sm border border-secondary">
-                            <div class="font-weight-bold mb-1 text-info">Quicks AI</div>
-                            <div>${escapeHtml(answerText).replace(/\n/g, '<br>')}</div>
-                        </div>
+                    <div class="chat-bubble chat-bubble-ai">
+                        <div class="chat-bubble-author mb-1"><i class="fa-solid fa-robot me-1"></i>Quicks AI</div>
+                        <div class="chat-bubble-text">${escapeHtml(answerText).replace(/\n/g, '<br>')}</div>
                     </div>
                 `;
                 scrollToBottom();
@@ -77,11 +71,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     errorMessage = xhr.responseText;
                 }
                 botBubble.innerHTML = `
-                    <div>
-                        <div class="flex-shrink-1 bg-danger text-white rounded py-2 px-3 ml-3 max-width-70 shadow-sm">
-                            <div class="font-weight-bold mb-1">System Error</div>
-                            <div>${escapeHtml(errorMessage)}</div>
-                        </div>
+                    <div class="chat-bubble chat-bubble-danger">
+                        <div class="chat-bubble-author mb-1"><i class="fa-solid fa-triangle-exclamation me-1"></i>System Error</div>
+                        <div class="chat-bubble-text">${escapeHtml(errorMessage)}</div>
                     </div>
                 `;
                 scrollToBottom();

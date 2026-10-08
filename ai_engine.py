@@ -43,10 +43,13 @@ class SimplePineconeVectorStore:
             embedding = embeddings.embed_query(doc.page_content)
             
             # Generate unique ID and bundle metadata
+            source_path = doc.metadata.get("source", "")
+            base_filename = os.path.basename(source_path) if source_path else ""
             vector_id = f"{namespace}_{i}_{secrets.token_hex(4)}"
             metadata = {
                 "text": doc.page_content,
-                "source": doc.metadata.get("source", "")
+                "source": source_path,
+                "filename": base_filename
             }
             vectors_to_upsert.append((vector_id, embedding, metadata))
             
@@ -178,15 +181,29 @@ def delete_user_file_embeddings(filename, user_id):
         pc = PineconeClient(api_key=os.environ.get('PINECONE_API_KEY'))
         index = pc.Index(INDEX_NAME)
         
-        # Files are saved in './static/uploads/user_<id>/filename'
         filepath = os.path.join('./static/uploads', f'user_{user_id}', filename)
         filepath_alt = filepath.replace('\\', '/')
+        tmp_path = os.path.join('/tmp/quicks_uploads', f'user_{user_id}', filename)
+        tmp_path_alt = tmp_path.replace('\\', '/')
         
-        # Filter vectors by source metadata matching the file path
-        index.delete(
-            filter={"source": {"$in": [filepath, filepath_alt]}}, 
-            namespace=f"user_{user_id}"
-        )
+        # Delete by filename filter
+        try:
+            index.delete(
+                filter={"filename": {"$eq": filename}}, 
+                namespace=f"user_{user_id}"
+            )
+        except Exception:
+            pass
+
+        # Also delete by source path filter (for backwards compatibility)
+        try:
+            index.delete(
+                filter={"source": {"$in": [filepath, filepath_alt, tmp_path, tmp_path_alt, filename]}}, 
+                namespace=f"user_{user_id}"
+            )
+        except Exception:
+            pass
+
         return True
     except Exception as e:
         print(f"Error deleting embeddings for {filename}: {e}")
