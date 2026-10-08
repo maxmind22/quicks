@@ -2,6 +2,21 @@
 {% extends "base.html" %}
 {% block content %}
 
+<!-- Flash Alerts on Top for Immediate Visibility -->
+<div class="mx-auto mb-3" style="max-width: 520px;">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show shadow-sm" role="alert">
+          <i class="fa-solid {% if category in ['danger', 'error'] %}fa-circle-exclamation{% elif category == 'warning' %}fa-triangle-exclamation{% else %}fa-circle-check{% endif %} me-2"></i>
+          <span>{{ message }}</span>
+          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+</div>
+
 <div class="box glass-card text-start" style="max-width: 520px;">
   <h2 class="mb-4 text-center form-card-title"><i class="fa-solid fa-cloud-arrow-up me-2 text-primary"></i>Upload Documents</h2>
   <p class="text-muted text-center mb-3" style="line-height: 1.6;">Supported formats: <strong class="text-main">PDF</strong> and <strong class="text-main">TXT</strong>. Uploaded files will be processed, chunked, and embedded into your isolated index space.</p>
@@ -22,19 +37,6 @@
       <i class="fa-solid fa-arrow-left me-1"></i> Back to Dashboard
     </a>
   </div>
-</div>
-
-<div class="max-width-500 mx-auto mt-4" style="max-width: 520px;">
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-      {% for category, message in messages %}
-        <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show" role="alert">
-          <span>{{ message }}</span>
-          <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-        </div>
-      {% endfor %}
-    {% endif %}
-  {% endwith %}
 </div>
 
 {% endblock %}
